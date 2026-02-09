@@ -1,4 +1,31 @@
-.Rproj.user
+# --- R Specific ---
 .Rhistory
 .RData
 .Ruserdata
+.Rapp.history
+*-Ex.R
+/*.tar.gz
+/*.Rcheck/
+.temp/
+# RStudio project files (keep the .Rproj file itself, ignore the user-specific folder)
+.Rproj.user/
+
+# --- VS Code Specific ---
+.vscode/
+# Unless you want to share specific workspace settings, ignore these:
+.history/
+*.code-workspace
+
+# --- OS Specific ---
+.DS_Store
+Thumbs.db
+
+# --- Data & Large Files ---
+# It is best practice to keep data out of Git. 
+# This ignores all CSVs and Excel files. 
+# If you NEED a specific data file, use !filename.zip to keep it.
+*.xlsx
+*.rds
+*.save
+*.zip
+*.gz

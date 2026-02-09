@@ -101,7 +101,15 @@ find_prospects <- function(need_cat, current_team, team_z, pool) {
     mutate(label = paste0(player_name, " (+", round(lift, 2), " lift)")) |> 
     pull(label)
   
-  return(if(length(prospects) == 0) "No targets identified" else paste(prospects, collapse = "; "))
+  
+  if(length(prospects) == 0) {
+    prospects_out <- "No targets identified" 
+    }
+  else{
+    prospects_out <- paste(prospects, collapse = "; ")
+  }
+  
+  return(prospects_out)
 }
 
 # generate trade report
@@ -121,3 +129,5 @@ final_trade_report <- team_trade_summary |>
 
 # Output
 View(final_trade_report)
+
+write.csv(final_trade_report, "trade_prospects_out.csv", row.names = FALSE)

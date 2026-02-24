@@ -131,3 +131,33 @@ final_trade_report <- team_trade_summary |>
 View(final_trade_report)
 
 write.csv(final_trade_report, "trade_prospects_out.csv", row.names = FALSE)
+
+
+# 1. Prepare the data
+team_analysis %>%
+  select(category, need_score)  %>%
+  ggplot(aes(x = need_score)) +
+  geom_histogram(aes(y = ..density..),      # Scale histogram to density
+                 bins = 30, 
+                 fill = "steelblue", 
+                 color = "white") +
+  geom_density(color = "red", size = 1) +   # Add the density curve
+  facet_wrap(~category, scales = "free") +  # Create a grid for each column
+  theme_minimal() +
+  labs(title = "Histograms and Density Functions",
+       x = "Value",
+       y = "Density")
+
+
+library(corrr)
+
+cor_matrix <- team_analysis %>%
+  select(team_abbr, category, need_score) %>%
+  pivot_wider(names_from = category, values_from = need_score) %>%
+  # 2. Calculate correlations
+  correlate() %>%
+  # 3. Optional: Make it pretty
+  shave() %>% # Removes the redundant upper triangle
+  fashion()   # Formats numbers for easy reading
+
+print(cor_matrix)

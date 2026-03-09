@@ -8,7 +8,7 @@ df <- read_csv("df_FINAL.csv")
 team_performance <- df |> 
   distinct(team_abbr, 
            lineup, minutes, 
-           off_pts, def_pts, offorb, deforb, off_3pt, deftov, defts) |> 
+           off_pts, def_pts, offorb, deforb, off_3pt, deftov, defts, offtov, ast) |> 
   group_by(team_abbr) |> 
   summarise(
     avg_off_rtg = weighted.mean(off_pts, minutes),
@@ -17,13 +17,14 @@ team_performance <- df |>
     avg_int_def = weighted.mean(defts, minutes),
     avg_reb_rate = weighted.mean(offorb + deforb, minutes),
     avg_3pt_freq = weighted.mean(off_3pt, minutes),
+    avg_pointplay_freq = weighted.mean((ast - offtov), minutes),
     total_min = sum(minutes)
   )
 
 # Define category weights (perceived importance for trades)
 category_weights <- tibble(
-  category = c("z_off", "z_perim", "z_inter", "z_reb", "z_3pt"),
-  weight = c(0.40, 0.20, 0.20, 0.10, 0.10) 
+  category = c("z_off", "z_perim", "z_inter", "z_reb", "z_3pt","z_ast"),
+  weight = c(0.30, 0.15, 0.15, 0.10, 0.10, 0.20) 
 )
 
 # Calculate normalized team needs
@@ -33,7 +34,8 @@ team_analysis <- team_performance |>
     z_perim = as.numeric(scale(avg_perim_def)),
     z_inter = as.numeric(scale(avg_int_def)),
     z_reb = as.numeric(scale(avg_reb_rate)),
-    z_3pt = as.numeric(scale(avg_3pt_freq))
+    z_3pt = as.numeric(scale(avg_3pt_freq)),
+    z_ast = as.numeric(scale(avg_pointplay_freq))
   ) |> 
   pivot_longer(cols = starts_with("z_"), names_to = "category", values_to = "perf_z") |> 
   left_join(category_weights, by = "category") |> 
@@ -45,7 +47,8 @@ team_analysis <- team_performance |>
       category == "z_perim" ~ "Perimeter Defense",
       category == "z_inter" ~ "Interior Defense",
       category == "z_reb" ~ "Rebounding",
-      category == "z_3pt" ~ "3pt Shooting"
+      category == "z_3pt" ~ "3pt Shooting",
+      category == "z_ast" ~ "Point Guard Play"
     )
   )
 
@@ -74,21 +77,32 @@ untouchables
 
 # Extract pool of potential trade targets (excluding untouchables)
 player_pool <- df |> 
-  distinct(player_name, team_abbr, pts, reb, stl, blk, fg3m, min) |> 
-  filter(!(player_name %in% untouchables)) |>  # remove untouchables
+  # distinct(player_name, team_abbr, pts, reb, stl, blk, fg3m, ast, offtov, min) |> 
+  # filter(!(player_name %in% untouchables)) |>  # remove untouchables
+  filter(!(player_name %in% untouchables)) |> 
+  group_by(player_name, team_abbr) |> 
+  summarise(
+    # Totaling stats first ensures we have one unique row per player
+    across(c(pts, reb, stl, blk, fg3m, ast, offtov, min), sum, .names = "{col}"),
+    .groups = "drop"
+  ) |>
   mutate(
     pts_pm = pts / min,
     reb_pm = reb / min,
     perim_pm = stl / min,
     int_pm = blk / min,
-    three_pm = fg3m / min
+    three_pm = fg3m / min,
+    ast_pm = ast / min,
+    tov_pm = offtov / min
+    
   ) |> 
   mutate(
     pz_off = as.numeric(scale(pts_pm)),
     pz_reb = as.numeric(scale(reb_pm)),
     pz_perim = as.numeric(scale(perim_pm)),
     pz_inter = as.numeric(scale(int_pm)),
-    pz_3pt = as.numeric(scale(three_pm))
+    pz_3pt = as.numeric(scale(three_pm)),
+    pz_ast = (as.numeric(scale(ast_pm)) + (as.numeric(scale(tov_pm)) * -1)) / 2
   )
 
 # special function to find trade prospects (and estimated "lift")
@@ -98,7 +112,8 @@ find_prospects <- function(need_cat, current_team, team_z, pool) {
     need_cat == "z_perim" ~ "pz_perim",
     need_cat == "z_inter" ~ "pz_inter",
     need_cat == "z_reb" ~ "pz_reb",
-    need_cat == "z_3pt" ~ "pz_3pt"
+    need_cat == "z_3pt" ~ "pz_3pt",
+    need_cat == "z_ast" ~ "pz_ast"
   )
   
   prospects <- pool |> 

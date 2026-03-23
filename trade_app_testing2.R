@@ -48,17 +48,34 @@ ui <- page_sidebar(
   theme = bs_theme(version = 5, bootswatch = "flatly"),
   sidebar = sidebar(
     title = "Analysis Controls",
+    
+    h5("Strategy Presets"),
     selectInput("preset", "Choose a Model:",
-                choices = c("Custom", "Balanced", "Script Match", "Small Ball", "Lockdown Defense")),
+                choices = c("Custom", "Balanced", "Small Ball", "Lockdown Defense", "Pure Scoring", "Glass Cleaners")),
+    
     hr(),
-    sliderInput("w_off", "Offense", 0, 10, 5),
-    sliderInput("w_perim", "Perim Def", 0, 10, 5),
-    sliderInput("w_inter", "Inter Def", 0, 10, 5),
-    sliderInput("w_reb", "Rebounding", 0, 10, 5),
-    sliderInput("w_3pt", "3PT Shooting", 0, 10, 5),
-    sliderInput("w_ast", "PG Play", 0, 10, 5),
+    h5("Category Importance (0-10)"),
+    sliderInput("w_off", "Offense", min = 0, max = 10, value = 5, step = 1),
+    sliderInput("w_perim", "Perimeter Defense", min = 0, max = 10, value = 5, step = 1),
+    sliderInput("w_inter", "Interior Defense", min = 0, max = 10, value = 5, step = 1),
+    sliderInput("w_reb", "Rebounding", min = 0, max = 10, value = 5, step = 1),
+    sliderInput("w_3pt", "3PT Shooting", min = 0, max = 10, value = 5, step = 1),
+    sliderInput("w_ast", "Point Guard Play", min = 0, max = 10, value = 5, step = 1),
+    
+    actionButton("reset_weights", "Reset to Balanced", 
+                 icon = icon("rotate-left"), 
+                 class = "btn-outline-secondary btn-sm w-100"),
+    
     hr(),
-    uiOutput("weight_display")
+    h5("Normalized Weighting"),
+    uiOutput("weight_display"),
+    
+    hr(),
+    h5("Filter Results"),
+    selectInput("filter_need", "Filter by Top Need Outcome:",
+                choices = c("All", "Scoring/Offense", "Interior Defense", 
+                            "Perimeter Defense", "Rebounding", "3pt Shooting","Point Guard Play"),
+                selected = "All")
   ),
   navset_card_underline(
     nav_panel("Trade Report", DTOutput("trade_table")),
@@ -76,19 +93,41 @@ server <- function(input, output, session) {
     read_csv("df_FINAL.csv", show_col_types = FALSE)
   })
 
-  # Preset Logic - Matches your script values
+  
+  # 2. Preset Logic
+  presets <- list(
+    "Balanced"         = c(5, 5, 5, 5, 5, 5),
+    "Small Ball"       = c(7, 8, 2, 2, 10, 9),
+    "Lockdown Defense" = c(3, 10, 10, 7, 3, 4),
+    "Pure Scoring"     = c(10, 3, 2, 3, 9, 7),
+    "Glass Cleaners"   = c(4, 4, 8, 10, 4, 4)
+  )
+  
   observeEvent(input$preset, {
     if (input$preset == "Custom") return()
-    presets <- list(
-      "Balanced"     = c(5, 5, 5, 5, 5, 5),
-      "Script Match" = c(9, 4.5, 4.5, 3, 3, 6), # Ratios of 0.30, 0.15, 0.15, 0.10, 0.10, 0.20
-      "Small Ball"   = c(7, 8, 2, 2, 10, 9),
-      "Lockdown Defense" = c(3, 10, 10, 7, 3, 4)
-    )
-    v <- presets[[input$preset]]
-    updateSliderInput(session, "w_off", value=v[1]); updateSliderInput(session, "w_perim", value=v[2])
-    updateSliderInput(session, "w_inter", value=v[3]); updateSliderInput(session, "w_reb", value=v[4])
-    updateSliderInput(session, "w_3pt", value=v[5]); updateSliderInput(session, "w_ast", value=v[6])
+    vals <- presets[[input$preset]]
+    updateSliderInput(session, "w_off", value = vals[1])
+    updateSliderInput(session, "w_perim", value = vals[2])
+    updateSliderInput(session, "w_inter", value = vals[3])
+    updateSliderInput(session, "w_reb", value = vals[4])
+    updateSliderInput(session, "w_3pt", value = vals[5])
+    updateSliderInput(session, "w_ast", value = vals[6])
+  })
+  
+  observe({
+    current_vals <- c(input$w_off, input$w_perim, input$w_inter, input$w_reb, input$w_3pt, input$w_ast)
+    isolate({
+      if (input$preset != "Custom") {
+        target_vals <- presets[[input$preset]]
+        if (!isTRUE(all.equal(current_vals, target_vals))) {
+          updateSelectInput(session, "preset", selected = "Custom")
+        }
+      }
+    })
+  })
+  
+  observeEvent(input$reset_weights, {
+    updateSelectInput(session, "preset", selected = "Balanced")
   })
 
   category_weights <- reactive({
@@ -127,10 +166,11 @@ server <- function(input, output, session) {
   team_trade_summary <- reactive({
     team_analysis() |> 
       group_by(team_abbr) |>
-      summarise(need_urgency = round(sum(weighted_need), 3), 
-                top_need = need_label[which.max(-perf_z)], # Matches script: which.max(need_score)
-                top_need_cat = category[which.max(-perf_z)], 
-                team_baseline_z = perf_z[which.max(-perf_z)], .groups="drop")
+      summarise(need_urgency = round(sum(weighted_need), 3),
+                idx = which.max(weighted_need), 
+                top_need = need_label[idx], # Matches script: which.max(need_score)
+                top_need_cat = category[idx], 
+                team_baseline_z = round(perf_z[idx],2), .groups="drop")
   })
 
   # Fixed Player Pool - Matches script "Untouchables" logic
@@ -142,7 +182,7 @@ server <- function(input, output, session) {
       group_by(team_abbr) |>
       mutate(is_team_leader = (pts == max(pts))) |>
       ungroup() |>
-      filter(pts_rank <= 15 | plus_minus_rank <= 15 | age >= 35 | is_team_leader) |>
+      filter(pts_rank <= 15 | plus_minus_rank <= 15 | age >= 35 | age <= 20 | is_team_leader) |>
       pull(player_id) |> unique()
 
     df |> 
@@ -167,10 +207,21 @@ server <- function(input, output, session) {
       rowwise() |> 
       mutate(trade_targets = find_prospects(top_need_cat, team_abbr, team_baseline_z, pool)) |> 
       ungroup() |> 
-      select(team_abbr, need_urgency, top_need, trade_targets) |> 
-      arrange(desc(need_urgency))
+      select(
+        Team = team_abbr, 
+        `Need Urgency` = need_urgency, 
+        `Top Need (Weighted)` = top_need, 
+        `Current Team Z` = team_baseline_z, # This shows the raw performance
+        `Trade Targets` = trade_targets
+      ) |> 
+      arrange(desc(`Need Urgency`))
     
-    datatable(report, options = list(pageLength = 30), rownames = FALSE, escape = FALSE)
+    datatable(report, 
+              options = list(pageLength = 30, autoWidth = TRUE), 
+              rownames = FALSE, 
+              escape = FALSE) |>
+      formatStyle('Current Team Z', 
+                  color = styleInterval(0, c('red', 'green'))) # Optional: Red if below avg, green if above
   })
   
   output$weight_display <- renderUI({

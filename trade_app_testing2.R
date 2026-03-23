@@ -23,7 +23,7 @@ find_prospects <- function(need_cat, current_team, team_z, pool) {
     filter(team_abbr != current_team) |> 
     mutate(lift = !!sym(player_stat_col) - team_z) |> 
     arrange(desc(!!sym(player_stat_col))) |> 
-    head(3) |> 
+    head(5) |> 
     mutate(
       img_url = paste0("https://cdn.nba.com/headshots/nba/latest/1040x760/", player_id, ".png"),
       label = paste0(
@@ -46,7 +46,6 @@ find_prospects <- function(need_cat, current_team, team_z, pool) {
 ui <- page_sidebar(
   title = "Basketball Trade Prospects Analysis",
   theme = bs_theme(version = 5, bootswatch = "flatly"),
-  
   sidebar = sidebar(
     title = "Analysis Controls",
     
@@ -78,14 +77,10 @@ ui <- page_sidebar(
                             "Perimeter Defense", "Rebounding", "3pt Shooting","Point Guard Play"),
                 selected = "All")
   ),
-  
   navset_card_underline(
     nav_panel("Trade Report", DTOutput("trade_table")),
-    nav_panel("Correlation Analysis", 
-              plotOutput("cor_plot", height = "500px"), # Slightly taller for heatmap
-              hr(),
-              h5("Correlation Matrix"),
-              verbatimTextOutput("cor_matrix_text"))
+    nav_panel("Correlation", plotOutput("cor_plot")),
+    nav_panel("Trade Deadline Comparison", DTOutput("deadline_results"))
   )
 )
 
@@ -99,12 +94,11 @@ server <- function(input, output, session) {
     read_csv("df_FINAL.csv", show_col_types = FALSE)
   })
 
-  # Preset Logic - Matches your script values
-  observeEvent(input$preset, {
-    if (input$preset == "Custom") return()
-    presets <- list(
-      "Balanced"     = c(5, 5, 5, 5, 5, 5),
-      "Small Ball"       = c(7, 8, 2, 2, 10, 9),
+  
+  # 2. Preset Logic
+  presets <- list(
+    "Balanced"         = c(5, 5, 5, 5, 5, 5),
+    "Small Ball"       = c(7, 8, 2, 2, 10, 9),
     "Lockdown Defense" = c(3, 10, 10, 7, 3, 4),
     "Pure Scoring"     = c(10, 3, 2, 3, 9, 7),
     "Glass Cleaners"   = c(4, 4, 8, 10, 4, 4)
@@ -113,6 +107,22 @@ server <- function(input, output, session) {
     updateSliderInput(session, "w_off", value=v[1]); updateSliderInput(session, "w_perim", value=v[2])
     updateSliderInput(session, "w_inter", value=v[3]); updateSliderInput(session, "w_reb", value=v[4])
     updateSliderInput(session, "w_3pt", value=v[5]); updateSliderInput(session, "w_ast", value=v[6])
+  })
+  
+  observe({
+    current_vals <- c(input$w_off, input$w_perim, input$w_inter, input$w_reb, input$w_3pt, input$w_ast)
+    isolate({
+      if (input$preset != "Custom") {
+        target_vals <- presets[[input$preset]]
+        if (!isTRUE(all.equal(current_vals, target_vals))) {
+          updateSelectInput(session, "preset", selected = "Custom")
+        }
+      }
+    })
+  })
+  
+  observeEvent(input$reset_weights, {
+    updateSelectInput(session, "preset", selected = "Balanced")
   })
 
   category_weights <- reactive({
@@ -151,10 +161,11 @@ server <- function(input, output, session) {
   team_trade_summary <- reactive({
     team_analysis() |> 
       group_by(team_abbr) |>
-      summarise(need_urgency = round(sum(weighted_need), 3), 
-                top_need = need_label[which.max(-perf_z)], # Matches script: which.max(need_score)
-                top_need_cat = category[which.max(-perf_z)], 
-                team_baseline_z = perf_z[which.max(-perf_z)], .groups="drop")
+      summarise(need_urgency = round(sum(weighted_need), 3),
+                idx = which.max(weighted_need), 
+                top_need = need_label[idx], # Matches script: which.max(need_score)
+                top_need_cat = category[idx], 
+                team_baseline_z = round(perf_z[idx],2), .groups="drop")
   })
 
   # Fixed Player Pool - Matches script "Untouchables" logic
@@ -166,7 +177,7 @@ server <- function(input, output, session) {
       group_by(team_abbr) |>
       mutate(is_team_leader = (pts == max(pts))) |>
       ungroup() |>
-      filter(pts_rank <= 15 | plus_minus_rank <= 15 | age >= 35 | is_team_leader) |>
+      filter(pts_rank <= 15 | plus_minus_rank <= 15 | age >= 35 | age <= 20 | is_team_leader) |>
       pull(player_id) |> unique()
 
     df |> 
@@ -191,10 +202,21 @@ server <- function(input, output, session) {
       rowwise() |> 
       mutate(trade_targets = find_prospects(top_need_cat, team_abbr, team_baseline_z, pool)) |> 
       ungroup() |> 
-      select(team_abbr, need_urgency, top_need, trade_targets) |> 
-      arrange(desc(need_urgency))
+      select(
+        Team = team_abbr, 
+        `Need Urgency` = need_urgency, 
+        `Top Need (Weighted)` = top_need, 
+        `Current Team Z` = team_baseline_z, # This shows the raw performance
+        `Trade Targets` = trade_targets
+      ) |> 
+      arrange(desc(`Need Urgency`))
     
-    datatable(report, options = list(pageLength = 30), rownames = FALSE, escape = FALSE)
+    datatable(report, 
+              options = list(pageLength = 30, autoWidth = TRUE), 
+              rownames = FALSE, 
+              escape = FALSE) |>
+      formatStyle('Current Team Z', 
+                  color = styleInterval(0, c('red', 'green'))) # Optional: Red if below avg, green if above
   })
   
   output$weight_display <- renderUI({
@@ -202,6 +224,23 @@ server <- function(input, output, session) {
     tags$div(style = "font-size: 0.85em; color: #555;",
              lapply(1:6, function(i) tags$div(tags$span(w$label[i]), tags$span(style="float:right; font-weight:bold;", paste0(round(w$weight[i]*100, 1), "%")), tags$br())))
   })
+
+  output$deadline_results <- renderDT({
+    df_trades <- read.csv("nba_trades.csv")
+    # array that pulls all nba playerids
+    player_pool_raw <- 
+    # The new pool will be playerids in both player_pool_raw & df_trades
+    player_pool <- filter(!(player_pool) %in% df_trades)
+
+    # Display each NBA team, who they "should" have traded for,
+    # then who they did trade for (if Applicable)
+
+
+
+
+  })
 }
 
 shinyApp(ui, server)
+
+# Nothing is appearing in Correlation Tab

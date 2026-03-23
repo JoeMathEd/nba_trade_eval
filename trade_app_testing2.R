@@ -23,7 +23,7 @@ find_prospects <- function(need_cat, current_team, team_z, pool) {
     filter(team_abbr != current_team) |> 
     mutate(lift = !!sym(player_stat_col) - team_z) |> 
     arrange(desc(!!sym(player_stat_col))) |> 
-    head(3) |> 
+    head(5) |> 
     mutate(
       img_url = paste0("https://cdn.nba.com/headshots/nba/latest/1040x760/", player_id, ".png"),
       label = paste0(
@@ -79,7 +79,8 @@ ui <- page_sidebar(
   ),
   navset_card_underline(
     nav_panel("Trade Report", DTOutput("trade_table")),
-    nav_panel("Correlation", plotOutput("cor_plot"))
+    nav_panel("Correlation", plotOutput("cor_plot")),
+    nav_panel("Trade Deadline Comparison", DTOutput("deadline_results"))
   )
 )
 
@@ -229,6 +230,23 @@ server <- function(input, output, session) {
     tags$div(style = "font-size: 0.85em; color: #555;",
              lapply(1:6, function(i) tags$div(tags$span(w$label[i]), tags$span(style="float:right; font-weight:bold;", paste0(round(w$weight[i]*100, 1), "%")), tags$br())))
   })
+
+  output$deadline_results <- renderDT({
+    df_trades <- read.csv("nba_trades.csv")
+    # array that pulls all nba playerids
+    player_pool_raw <- 
+    # The new pool will be playerids in both player_pool_raw & df_trades
+    player_pool <- filter(!(player_pool) %in% df_trades)
+
+    # Display each NBA team, who they "should" have traded for,
+    # then who they did trade for (if Applicable)
+
+
+
+
+  })
 }
 
 shinyApp(ui, server)
+
+# Nothing is appearing in Correlation Tab

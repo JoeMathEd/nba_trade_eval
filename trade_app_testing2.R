@@ -232,19 +232,42 @@ server <- function(input, output, session) {
   })
 
   output$deadline_results <- renderDT({
+    # 1. Load trade data
     df_trades <- read.csv("nba_trades.csv")
-    # array that pulls all nba playerids
-    player_pool_raw <- 
-    # The new pool will be playerids in both player_pool_raw & df_trades
-    player_pool <- filter(!(player_pool) %in% df_trades)
+    
+    # 2. Get the full dataframe pool, not just a vector of IDs
+    # This ensures find_prospects() has the columns it needs (team_abbr, pz_off, etc.)
+    pool_df <- player_pool() 
+    
+    # Optional: Filter the pool to only include players who actually moved in real life
+    # pool_df <- pool_df |> filter(player_id %in% df_trades$playerid)
 
-    # Display each NBA team, who they "should" have traded for,
-    # then who they did trade for (if Applicable)
+    trade_comparison <- team_trade_summary() |> 
+      dplyr::rowwise() |> 
+      dplyr::mutate(
+        # Pass the DATAFRAME (pool_df), not a vector
+        trade_targets = find_prospects(top_need_cat, team_abbr, team_baseline_z, pool_df),
+        
+        actual_trades = df_trades |> 
+          dplyr::filter(trade_new_team == team_abbr) |> 
+          dplyr::pull(player) |> 
+          unique() |> 
+          paste(collapse = "; ")
+      ) |> 
+      dplyr::ungroup() |> 
+      dplyr::select(
+        Team = team_abbr, 
+        `Top Need` = top_need, 
+        `Suggested Trade Targets` = trade_targets,
+        `Actual Trade Targets` = actual_trades
+      )
 
-
-
-
+    datatable(trade_comparison, 
+              options = list(pageLength = 30, autoWidth = TRUE), 
+              rownames = FALSE, 
+              escape = FALSE)
   })
+
 }
 
 shinyApp(ui, server)

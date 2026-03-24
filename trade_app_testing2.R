@@ -231,41 +231,88 @@ server <- function(input, output, session) {
              lapply(1:6, function(i) tags$div(tags$span(w$label[i]), tags$span(style="float:right; font-weight:bold;", paste0(round(w$weight[i]*100, 1), "%")), tags$br())))
   })
 
-  output$deadline_results <- renderDT({
-    # 1. Load trade data
-    df_trades <- read.csv("nba_trades.csv")
-    
-    # 2. Get the full dataframe pool, not just a vector of IDs
-    # This ensures find_prospects() has the columns it needs (team_abbr, pz_off, etc.)
-    pool_df <- player_pool() 
-    
-    # Optional: Filter the pool to only include players who actually moved in real life
-    # pool_df <- pool_df |> filter(player_id %in% df_trades$playerid)
+output$deadline_results <- renderDT({
+  # 1. Load trade data and evaluate the player pool reactive
+  df_trades <- read.csv("nba_trades_cleaned.csv")
+  pool_df <- player_pool() 
 
-    trade_comparison <- team_trade_summary() |> 
-      dplyr::rowwise() |> 
-      dplyr::mutate(
-        # Pass the DATAFRAME (pool_df), not a vector
-        trade_targets = find_prospects(top_need_cat, team_abbr, team_baseline_z, pool_df),
+  # 2. Define the lookup map
+  stat_lookup <- c(
+    "z_off"   = "pz_off",
+    "z_perim" = "pz_perim",
+    "z_inter" = "pz_inter",
+    "z_reb"   = "pz_reb",
+    "z_3pt"   = "pz_3pt",
+    "z_ast"   = "pz_ast"
+  )
+
+  trade_comparison <- team_trade_summary() |> 
+    dplyr::rowwise() |> 
+    dplyr::mutate(
+      # Identify the stat column name based on the team's top need
+      target_col_name = stat_lookup[top_need_cat],
+      
+      # 1. Suggested Targets (Your global function)
+      trade_targets = find_prospects(top_need_cat, team_abbr, team_baseline_z, pool_df),
+
+      # 2. Actual Trades Logic
+      actual_trades = {
+        # Create a local reference to the column name and baseline for the sub-pipe
+        col <- target_col_name
+        base <- team_baseline_z
         
-        actual_trades = df_trades |> 
+        df_trades |> 
           dplyr::filter(trade_new_team == team_abbr) |> 
-          dplyr::pull(player) |> 
-          unique() |> 
-          paste(collapse = "; ")
-      ) |> 
-      dplyr::ungroup() |> 
-      dplyr::select(
-        Team = team_abbr, 
-        `Top Need` = top_need, 
-        `Suggested Trade Targets` = trade_targets,
-        `Actual Trade Targets` = actual_trades
-      )
+          # Hypothetical Fix 1
+          dplyr::distinct(playerid, .keep_all = TRUE) |>
+          dplyr::inner_join(pool_df, by = c("playerid" = "player_id")) |> 
+          dplyr::mutate(
+            # Use get() to evaluate the string 'col' as a column name
+            lift_val = get(col) - base,
+            # Hypothetical Fix 2
+            lift_fmt = sprintf("%+.2f", lift_val),
+            label = paste0(
+              "<div style='display: inline-block; text-align: center; margin-right: 15px;'>",
+              "<img src='https://cdn.nba.com/headshots/nba/latest/1040x760/", playerid, ".png' ",
+              "style='height: 60px; object-fit: cover;' alt='", player, "'><br>",
+              "<span style='font-size:0.85em; font-weight: bold;'>", player, "</span><br>",
+              "<span style='font-size: 0.8em; color: gray;'>(", lift_fmt, ")</span>",
+              "</div>"
+            )
+            
+          ) |> 
+          dplyr::pull(label) |> 
+          paste(collapse = "")
+      }
+    ) |> 
+    dplyr::ungroup() |> 
+    dplyr::select(
+      Team = team_abbr, 
+      `Top Need` = top_need, 
+      `Suggested Trade Targets` = trade_targets,
+      `Actual Trade Targets` = actual_trades
+    )
 
-    datatable(trade_comparison, 
-              options = list(pageLength = 30, autoWidth = TRUE), 
-              rownames = FALSE, 
-              escape = FALSE)
+  datatable(trade_comparison, 
+            options = list(pageLength = 30, autoWidth = TRUE), 
+            rownames = FALSE, 
+            escape = FALSE)
+})
+
+  # Correlation matrix for the Correlation tab
+  cor_data <- reactive({
+    team_analysis() |>
+      select(team_abbr, category, weighted_need) |>
+      pivot_wider(names_from = category, values_from = weighted_need) |>
+      select(-team_abbr) |>
+      correlate(quiet = TRUE)
+  })
+
+  output$cor_plot <- renderPlot({
+    cor_data() |>
+      rplot() +
+      theme_minimal() +
+      labs(title = "Category Needs Correlation Network")
   })
 
 }
@@ -273,3 +320,6 @@ server <- function(input, output, session) {
 shinyApp(ui, server)
 
 # Nothing is appearing in Correlation Tab
+
+# Ochai Agbaji appearing twice
+# Ousmane Dieng Not appearing due to being an untouchable

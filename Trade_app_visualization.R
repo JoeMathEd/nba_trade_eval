@@ -1,4 +1,3 @@
-
 library(shiny)
 library(tidyverse)
 library(corrr)
@@ -6,14 +5,25 @@ library(DT)
 library(bslib)
 library(plotly)
 library(beeswarm)
-library(shinyWidgets) # Required for horizontal buttons
+library(shinyWidgets)
 
 # -------------------------------------------------------------------------
-# GLOBAL FUNCTIONS
+# GLOBAL SETTINGS & FUNCTIONS
 # -------------------------------------------------------------------------
+# Using a list to prevent the jsonlite "asJSON" warning
+metric_choices <- list(
+  "Offense" = "z_off",
+  "Perimeter Defense" = "z_perim",
+  "Interior Defense" = "z_inter",
+  "Rebounding" = "z_reb",
+  "3PT Shooting" = "z_3pt",
+  "Point Guard Play" = "z_ast"
+)
+
 find_prospects <- function(need_cat, current_team, team_z, pool) {
   if (is.null(pool) || nrow(pool) == 0) return("No players available")
   
+  # Map the team-need category to the player-stat category
   player_stat_col <- case_when(
     need_cat == "z_off"   ~ "pz_off",
     need_cat == "z_perim" ~ "pz_perim",
@@ -21,7 +31,7 @@ find_prospects <- function(need_cat, current_team, team_z, pool) {
     need_cat == "z_reb"   ~ "pz_reb",
     need_cat == "z_3pt"   ~ "pz_3pt",
     need_cat == "z_ast"   ~ "pz_ast",
-    TRUE ~ "pz_off{}"
+    TRUE ~ "pz_off"
   )
   
   prospects <- pool |> 
@@ -45,30 +55,17 @@ find_prospects <- function(need_cat, current_team, team_z, pool) {
   paste(prospects, collapse = "")
 }
 
-# Mapping for the new League Distributions tab
-# Changed from c(...) to list(...) to satisfy jsonlite requirements
-metric_choices <- list(
-  "Offense" = "z_off",
-  "Perimeter Defense" = "z_perim",
-  "Interior Defense" = "z_inter",
-  "Rebounding" = "z_reb",
-  "3PT Shooting" = "z_3pt",
-  "Point Guard Play" = "z_ast"
-)
-
 # -------------------------------------------------------------------------
 # UI
 # -------------------------------------------------------------------------
 ui <- page_sidebar(
-  title = "Basketball Trade Prospects Analysis",
+  title = "NBA Trade Analysis Dashboard",
   theme = bs_theme(version = 5, bootswatch = "flatly"),
   sidebar = sidebar(
     title = "Analysis Controls",
-    
     h5("Strategy Presets"),
     selectInput("preset", "Choose a Model:",
                 choices = c("Custom", "Balanced", "Small Ball", "Lockdown Defense", "Pure Scoring", "Glass Cleaners")),
-    
     hr(),
     h5("Category Importance (0-10)"),
     sliderInput("w_off", "Offense", min = 0, max = 10, value = 5, step = 1),
@@ -77,29 +74,17 @@ ui <- page_sidebar(
     sliderInput("w_reb", "Rebounding", min = 0, max = 10, value = 5, step = 1),
     sliderInput("w_3pt", "3PT Shooting", min = 0, max = 10, value = 5, step = 1),
     sliderInput("w_ast", "Point Guard Play", min = 0, max = 10, value = 5, step = 1),
-    
-    actionButton("reset_weights", "Reset to Balanced", 
-                 icon = icon("rotate-left"), 
-                 class = "btn-outline-secondary btn-sm w-100"),
-    
+    actionButton("reset_weights", "Reset to Balanced", icon = icon("rotate-left"), class = "btn-outline-secondary btn-sm w-100"),
     hr(),
-    h5("Normalized Weighting"),
-    uiOutput("weight_display"),
-    
-    hr(),
-    h5("Filter Results"),
-    selectInput("filter_need", "Filter by Top Need Outcome:",
-                choices = c("All", "Scoring/Offense", "Interior Defense", 
-                            "Perimeter Defense", "Rebounding", "3pt Shooting","Point Guard Play"),
-                selected = "All")
+    h5("Weight Distribution"),
+    uiOutput("weight_display")
   ),
   navset_card_underline(
     nav_panel("Trade Report", DTOutput("trade_table")),
-    nav_panel("Trade Deadline Comparison", DTOutput("deadline_results")),
-    nav_panel("Correlation Analysis", 
-              plotOutput("cor_plot", height = "500px"), # Slightly taller for heatmap
+    nav_panel("Deadline Comparison", DTOutput("deadline_results")),
+    nav_panel("Correlations", 
+              plotOutput("cor_plot", height = "500px"),
               hr(),
-              h5("Correlation Matrix"),
               verbatimTextOutput("cor_matrix_text")),
     nav_panel("League Distributions", 
               card(
@@ -111,7 +96,7 @@ ui <- page_sidebar(
                 ),
                 plotlyOutput("teamPlot", height = "600px")
               )
-    ) 
+    )
   )
 )
 
@@ -120,12 +105,13 @@ ui <- page_sidebar(
 # -------------------------------------------------------------------------
 server <- function(input, output, session) {
   
+  # 1. Load Data with requirement checks
   raw_data <- reactive({
-    req(file.exists("df_FINAL.csv")) 
+    req(file.exists("df_FINAL.csv"))
     read_csv("df_FINAL.csv", show_col_types = FALSE)
   })
 
-
+  # 2. Centralized Team Data Processing
   team_summary_data <- reactive({
     raw_data() |> 
       distinct(team_abbr, lineup, minutes, off_pts, deftov, defts, offorb, deforb, off_3pt, ast, offtov) |> 
@@ -138,12 +124,13 @@ server <- function(input, output, session) {
         avg_3pt = weighted.mean(off_3pt, minutes),
         avg_ast = weighted.mean(ast - offtov, minutes), .groups="drop"
       ) |>
-      mutate(across(starts_with("avg_"), ~as.numeric(scale(.x)), .names = "z_{str_remove(.x, 'avg_')}")) |>
-      # This line adds the ESPN logos for the plot!
+      # FIXED: Using {.col} inside across for proper naming
+      mutate(across(starts_with("avg_"), ~as.numeric(scale(.x)), 
+                    .names = "z_{str_remove(.col, 'avg_')}")) |>
       mutate(url_team = paste0("https://a.espncdn.com/i/teamlogos/nba/500/", team_abbr, ".png"))
   })
   
-  # 2. Preset Logic
+  # 3. Presets
   presets <- list(
     "Balanced"         = c(5, 5, 5, 5, 5, 5),
     "Small Ball"       = c(7, 8, 2, 2, 10, 9),
@@ -162,22 +149,6 @@ server <- function(input, output, session) {
     updateSliderInput(session, "w_3pt", value = vals[5])
     updateSliderInput(session, "w_ast", value = vals[6])
   })
-  
-  observe({
-    current_vals <- c(input$w_off, input$w_perim, input$w_inter, input$w_reb, input$w_3pt, input$w_ast)
-    isolate({
-      if (input$preset != "Custom") {
-        target_vals <- presets[[input$preset]]
-        if (!isTRUE(all.equal(current_vals, target_vals))) {
-          updateSelectInput(session, "preset", selected = "Custom")
-        }
-      }
-    })
-  })
-  
-  observeEvent(input$reset_weights, {
-    updateSelectInput(session, "preset", selected = "Balanced")
-  })
 
   category_weights <- reactive({
     vals <- c(z_off=input$w_off, z_perim=input$w_perim, z_inter=input$w_inter, 
@@ -187,22 +158,9 @@ server <- function(input, output, session) {
     tibble(category=names(vals), weight=norm, label=c("Offense", "Perim Def", "Inter Def", "Reb", "3PT", "PG Play"))
   })
 
-  # Team Analysis Logic from analysis_initial_testing.R
   team_analysis <- reactive({
     cw <- category_weights()
-    raw_data() |> 
-      distinct(team_abbr, lineup, minutes, off_pts, deftov, defts, offorb, deforb, off_3pt, ast, offtov) |> 
-      group_by(team_abbr) |> 
-      summarise(
-        avg_off = weighted.mean(off_pts, minutes),
-        avg_perim = weighted.mean(deftov, minutes), 
-        avg_int = weighted.mean(defts, minutes),
-        avg_reb = weighted.mean(offorb + deforb, minutes),
-        avg_3pt = weighted.mean(off_3pt, minutes),
-        avg_ast = weighted.mean(ast - offtov, minutes), .groups="drop"
-      ) |>
-      mutate(across(c(avg_off, avg_perim, avg_int, avg_reb, avg_3pt, avg_ast), ~as.numeric(scale(.x)), .names = "z_{.col}")) |>
-      rename(z_off=z_avg_off, z_perim=z_avg_perim, z_inter=z_avg_int, z_reb=z_avg_reb, z_3pt=z_avg_3pt, z_ast=z_avg_ast) |>
+    team_summary_data() |>
       pivot_longer(cols=starts_with("z_"), names_to="category", values_to="perf_z") |>
       left_join(cw, by="category") |>
       mutate(weighted_need = (-perf_z) * weight,
@@ -217,17 +175,17 @@ server <- function(input, output, session) {
       group_by(team_abbr) |>
       summarise(need_urgency = round(sum(weighted_need), 3),
                 idx = which.max(weighted_need), 
-                top_need = need_label[idx], # Matches script: which.max(need_score)
+                top_need = need_label[idx], 
                 top_need_cat = category[idx], 
                 team_baseline_z = round(perf_z[idx],2), .groups="drop")
   })
 
-  # Fixed Player Pool - Matches script "Untouchables" logic
+  # 4. Player Pool (Fixing the Duplicate Issue)
   player_pool <- reactive({
     df <- raw_data()
     
     untouchable_ids <- df |>
-      filter(!duplicated(player_id)) |>
+      distinct(player_id, .keep_all = TRUE) |>
       group_by(team_abbr) |>
       mutate(is_team_leader = (pts == max(pts))) |>
       ungroup() |>
@@ -236,6 +194,7 @@ server <- function(input, output, session) {
 
     df |> 
       filter(!(player_id %in% untouchable_ids)) |> 
+      # Grouping by ID to ensure distinct players
       group_by(player_id, player_name, team_abbr) |> 
       summarise(across(c(pts, reb, stl, blk, fg3m, ast, offtov, min), sum, na.rm = TRUE), .groups = "drop") |>
       filter(min > 50) |>
@@ -245,157 +204,72 @@ server <- function(input, output, session) {
         pz_perim = as.numeric(scale(stl/min)),
         pz_inter = as.numeric(scale(blk/min)), 
         pz_3pt   = as.numeric(scale(fg3m/min)), 
-        # Matches script pz_ast calculation
         pz_ast   = (as.numeric(scale(ast/min)) + (as.numeric(scale(offtov/min)) * -1)) / 2
       )
   })
 
+  # 5. Outputs
   output$trade_table <- renderDT({
     pool <- player_pool()
     report <- team_trade_summary() |> 
       rowwise() |> 
       mutate(trade_targets = find_prospects(top_need_cat, team_abbr, team_baseline_z, pool)) |> 
       ungroup() |> 
-      select(
-        Team = team_abbr, 
-        `Need Urgency` = need_urgency, 
-        `Top Need (Weighted)` = top_need, 
-        `Current Team Z` = team_baseline_z, # This shows the raw performance
-        `Trade Targets` = trade_targets
-      ) |> 
+      select(Team = team_abbr, `Need Urgency` = need_urgency, `Top Need` = top_need, 
+             `Stat Z` = team_baseline_z, `Targets` = trade_targets) |> 
       arrange(desc(`Need Urgency`))
     
-    datatable(report, 
-              options = list(pageLength = 30, autoWidth = TRUE), 
-              rownames = FALSE, 
-              escape = FALSE) |>
-      formatStyle('Current Team Z', 
-                  color = styleInterval(0, c('red', 'green'))) # Optional: Red if below avg, green if above
-  })
-  
-  output$weight_display <- renderUI({
-    w <- category_weights()
-    tags$div(style = "font-size: 0.85em; color: #555;",
-             lapply(1:6, function(i) tags$div(tags$span(w$label[i]), tags$span(style="float:right; font-weight:bold;", paste0(round(w$weight[i]*100, 1), "%")), tags$br())))
+    datatable(report, options = list(pageLength = 30, autoWidth = TRUE), rownames = FALSE, escape = FALSE)
   })
 
-output$deadline_results <- renderDT({
-  # 1. Load trade data and evaluate the player pool reactive
-  df_trades <- read.csv("nba_trades_cleaned.csv")
-  pool_df <- player_pool() 
+  output$deadline_results <- renderDT({
+    req(file.exists("nba_trades_cleaned.csv"))
+    df_trades <- read_csv("nba_trades_cleaned.csv", show_col_types = FALSE) |> 
+      mutate(playerid = as.character(playerid)) # Ensure type match for join
+    
+    pool_df <- player_pool() |> mutate(player_id = as.character(player_id))
+    stat_lookup <- c("z_off"="pz_off", "z_perim"="pz_perim", "z_inter"="pz_inter", "z_reb"="pz_reb", "z_3pt"="pz_3pt", "z_ast"="pz_ast")
 
-  # 2. Define the lookup map
-  stat_lookup <- c(
-    "z_off"   = "pz_off",
-    "z_perim" = "pz_perim",
-    "z_inter" = "pz_inter",
-    "z_reb"   = "pz_reb",
-    "z_3pt"   = "pz_3pt",
-    "z_ast"   = "pz_ast"
-  )
+    trade_comparison <- team_trade_summary() |> 
+      rowwise() |> 
+      mutate(
+        target_col = stat_lookup[top_need_cat],
+        trade_targets = find_prospects(top_need_cat, team_abbr, team_baseline_z, pool_df),
+        actual_trades = {
+          col_name <- target_col
+          base_z <- team_baseline_z
+          df_trades |> 
+            filter(trade_new_team == team_abbr) |> 
+            distinct(playerid, .keep_all = TRUE) |>
+            inner_join(pool_df, by = c("playerid" = "player_id")) |> 
+            mutate(lift = get(col_name) - base_z,
+                   label = paste0("<div style='display:inline-block; text-align:center; margin-right:10px;'><img src='https://cdn.nba.com/headshots/nba/latest/1040x760/", playerid, ".png' style='height:50px;'><br><b>", player, "</b><br>(", sprintf("%+.2f", lift), ")</div>")) |> 
+            pull(label) |> paste(collapse = "")
+        }
+      ) |> ungroup() |> select(Team = team_abbr, `Need` = top_need, `Suggested` = trade_targets, `Actual` = actual_trades)
 
-  trade_comparison <- team_trade_summary() |> 
-    dplyr::rowwise() |> 
-    dplyr::mutate(
-      # Identify the stat column name based on the team's top need
-      target_col_name = stat_lookup[top_need_cat],
-      
-      # 1. Suggested Targets (Your global function)
-      trade_targets = find_prospects(top_need_cat, team_abbr, team_baseline_z, pool_df),
+    datatable(trade_comparison, options = list(pageLength = 30, autoWidth = TRUE), rownames = FALSE, escape = FALSE)
+  })
 
-      # 2. Actual Trades Logic
-      actual_trades = {
-        # Create a local reference to the column name and baseline for the sub-pipe
-        col <- target_col_name
-        base <- team_baseline_z
-        
-        df_trades |> 
-          dplyr::filter(trade_new_team == team_abbr) |> 
-          # Hypothetical Fix 1
-          dplyr::distinct(playerid, .keep_all = TRUE) |>
-          dplyr::inner_join(pool_df, by = c("playerid" = "player_id")) |> 
-          dplyr::mutate(
-            # Use get() to evaluate the string 'col' as a column name
-            lift_val = get(col) - base,
-            # Hypothetical Fix 2
-            lift_fmt = sprintf("%+.2f", lift_val),
-            label = paste0(
-              "<div style='display: inline-block; text-align: center; margin-right: 15px;'>",
-              "<img src='https://cdn.nba.com/headshots/nba/latest/1040x760/", playerid, ".png' ",
-              "style='height: 60px; object-fit: cover;' alt='", player, "'><br>",
-              "<span style='font-size:0.85em; font-weight: bold;'>", player, "</span><br>",
-              "<span style='font-size: 0.8em; color: gray;'>(", lift_fmt, ")</span>",
-              "</div>"
-            )
-            
-          ) |> 
-          dplyr::pull(label) |> 
-          paste(collapse = "")
-      }
-    ) |> 
-    dplyr::ungroup() |> 
-    dplyr::select(
-      Team = team_abbr, 
-      `Top Need` = top_need, 
-      `Suggested Trade Targets` = trade_targets,
-      `Actual Trade Targets` = actual_trades
-    )
-
-  datatable(trade_comparison, 
-            options = list(pageLength = 30, autoWidth = TRUE), 
-            rownames = FALSE, 
-            escape = FALSE)
-})
-
-  # FIXED CORRELATION PLOT: Upper Triangular Heatmap Tiles
- # CORRELATION MATRIX CALCULATIONS
-  cor_data <- reactive({
-    team_analysis() |>
+  output$cor_plot <- renderPlot({
+    cd <- team_analysis() |>
       select(team_abbr, category, weighted_need) |>
       pivot_wider(names_from = category, values_from = weighted_need) |>
-      select(-team_abbr) |> 
-      correlate(quiet = TRUE)
-  })
-  
-  # FIXED CORRELATION PLOT: Upper Triangular Heatmap Tiles
-  output$cor_plot <- renderPlot({
-    cd <- cor_data()
+      select(-team_abbr) |> correlate(quiet = TRUE)
     
-    # Human-readable labels for the plot
-    cat_map <- c("z_off" = "Offense", "z_perim" = "Perim Def", "z_inter" = "Inter Def", 
-                 "z_reb" = "Rebounding", "z_3pt" = "3PT", "z_ast" = "PG Play")
-    
-    long_cor <- cd |> 
-      pivot_longer(-term, names_to = "variable", values_to = "correlation") |>
+    cat_map <- c("z_off"="Offense", "z_perim"="Perim Def", "z_inter"="Inter Def", "z_reb"="Reb", "z_3pt"="3PT", "z_ast"="PG Play")
+    long_cor <- cd |> pivot_longer(-term, names_to = "variable", values_to = "correlation") |>
       filter(!is.na(correlation)) |>
-      mutate(
-        term = factor(term, levels = names(cat_map), labels = cat_map),
-        variable = factor(variable, levels = names(cat_map), labels = cat_map)
-      ) |>
-      # Filter for Upper Triangular logic (Row index < Col index)
+      mutate(term = factor(term, levels = names(cat_map), labels = cat_map),
+             variable = factor(variable, levels = names(cat_map), labels = cat_map)) |>
       filter(as.numeric(term) < as.numeric(variable))
     
     ggplot(long_cor, aes(x = variable, y = term, fill = correlation)) +
-      geom_tile(color = "white") +
-      geom_text(aes(label = sprintf("%.2f", correlation)), color = "black", size = 4) +
-      scale_fill_gradient2(low = "#e67e22", mid = "white", high = "#2ecc71", 
-                           midpoint = 0, limit = c(-1, 1), name="Correlation") +
-      theme_minimal() +
-      theme(
-        axis.title = element_blank(),
-        panel.grid = element_blank(),
-        axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
-        legend.position = "right"
-      ) +
-      coord_fixed()
-  })
-  
-  # THis should be good
-  output$cor_matrix_text <- renderPrint({
-    cor_data() |> shave() |> fashion()
+      geom_tile(color = "white") + geom_text(aes(label = sprintf("%.2f", correlation))) +
+      scale_fill_gradient2(low = "#e67e22", mid = "white", high = "#2ecc71", midpoint = 0, limit = c(-1, 1)) +
+      theme_minimal() + theme(axis.title = element_blank()) + coord_fixed()
   })
 
-#Team Visualization Logic from perf_viz_shiny_app.R
   output$teamPlot <- renderPlotly({
     df <- team_summary_data() 
     req(input$target_var)
@@ -427,11 +301,8 @@ output$deadline_results <- renderDT({
   })
 }
 
-
 shinyApp(ui, server)
 
-# Fixed Correlation Tab
 
-# Ochai Agbaji appearing twice
-# Ousmane Dieng Not appearing due to being an untouchable
-
+# THis is what I got the AI to generate
+# However it messed up the other sectons, so I just need to integrate the two

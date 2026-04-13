@@ -4,6 +4,9 @@ library(tidyverse)
 library(corrr)
 library(DT)
 library(bslib)
+# install.packages("plotly")
+# install.packages("beeswarm")
+# install.packages("shinyWidgets")
 library(plotly)
 library(beeswarm)
 library(shinyWidgets) # Required for horizontal buttons
@@ -284,19 +287,7 @@ output$deadline_results <- renderDT({
   df_trades <- read.csv("nba_trades_cleaned.csv") |> 
     rename(player_id = playerid)
   
-  pool_df <- raw_data() |> 
-    group_by(player_id, player_name, team_abbr) |> 
-    summarise(across(c(pts, reb, stl, blk, fg3m, ast, offtov, min), 
-                     sum, na.rm = TRUE), .groups = "drop") |>
-    mutate(
-      pz_off   = as.numeric(scale(pts/min)), 
-      pz_reb   = as.numeric(scale(reb/min)), 
-      pz_perim = as.numeric(scale(stl/min)),
-      pz_int = as.numeric(scale(blk/min)), 
-      pz_3pt   = as.numeric(scale(fg3m/min)), 
-      # Matches script pz_ast calculation
-      pz_ast   = (as.numeric(scale(ast/min)) + (as.numeric(scale(offtov/min)) * -1)) / 2
-    ) |> 
+  pool_df <- player_pool() |> 
     filter(!duplicated(player_id))
 
   # 2. Define the lookup map
@@ -316,6 +307,10 @@ output$deadline_results <- renderDT({
       target_col_name = stat_lookup[top_need_cat],
       
       # 1. Suggested Targets (Your global function)
+      # I thought this would work
+      # display_df <- pool_df |> 
+      #     filter(!(player_id %in% untouchables)),
+          
       trade_targets = find_prospects(top_need_cat, team_abbr, team_baseline_z, pool_df),
 
       # 2. Actual Trades Logic
@@ -477,7 +472,6 @@ output$deadline_results <- renderDT({
 shinyApp(ui, server)
 
 # Fixed Correlation Tab
+# The Actual trades is showing a unrestricted pool, showing untouchables
 
-# Ochai Agbaji appearing twice
-# Ousmane Dieng Not appearing due to being an untouchable
-
+# THis is the main file, bad headshots is only issue to my knowledge.

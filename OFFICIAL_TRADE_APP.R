@@ -475,3 +475,6 @@ shinyApp(ui, server)
 # The Actual trades is showing a unrestricted pool, showing untouchables
 
 # THis is the main file, bad headshots is only issue to my knowledge.
+
+#BIG QUESTIONS
+# WHY ARE PLAYERS APPEARING WITH N/A LIFT VALUES IN THE TRADE COMPARISON TAB?

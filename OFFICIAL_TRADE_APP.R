@@ -299,6 +299,20 @@ output$deadline_results <- renderDT({
     "z_3pt"   = "pz_3pt",
     "z_ast"   = "pz_ast"
   )
+  
+  # form a larger pool_df_full (not filtered)
+  pool_df_full <- raw_data() |> 
+    group_by(player_id, player_name, team_abbr) |> 
+    summarise(across(c(pts, reb, stl, blk, fg3m, ast, offtov, min), sum, na.rm = TRUE), .groups = "drop") |>
+    mutate(
+      pz_off   = as.numeric(scale(pts/min)), 
+      pz_reb   = as.numeric(scale(reb/min)), 
+      pz_perim = as.numeric(scale(stl/min)),
+      pz_int = as.numeric(scale(blk/min)), 
+      pz_3pt   = as.numeric(scale(fg3m/min)), 
+      # Matches script pz_ast calculation
+      pz_ast   = (as.numeric(scale(ast/min)) + (as.numeric(scale(offtov/min)) * -1)) / 2
+    )
 
   trade_comparison <- team_trade_summary() |> 
     dplyr::rowwise() |> 
@@ -323,7 +337,7 @@ output$deadline_results <- renderDT({
           dplyr::filter(trade_new_team == team_abbr) |> 
           # Hypothetical Fix 1
           # dplyr::distinct(playerid, .keep_all = TRUE) |>
-          dplyr::left_join(pool_df) |> 
+          dplyr::left_join(pool_df_full) |> 
           dplyr::mutate(
             # Use get() to evaluate the string 'col' as a column name
             lift_val = get(col) - base,

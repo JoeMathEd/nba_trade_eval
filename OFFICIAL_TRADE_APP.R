@@ -4,9 +4,6 @@ library(tidyverse)
 library(corrr)
 library(DT)
 library(bslib)
-# install.packages("plotly")
-# install.packages("beeswarm")
-# install.packages("shinyWidgets")
 library(plotly)
 library(beeswarm)
 library(shinyWidgets) # Required for horizontal buttons
@@ -49,7 +46,6 @@ find_prospects <- function(need_cat, current_team, team_z, pool) {
 }
 
 # Mapping for the new League Distributions tab
-# Changed from c(...) to list(...) to satisfy jsonlite requirements
 metric_choices <- list(
   "Offense" = "z_off",
   "Perimeter Defense" = "z_perim",
@@ -202,8 +198,6 @@ server <- function(input, output, session) {
         avg_3pt = weighted.mean(off_3pt, minutes),
         avg_ast = weighted.mean(ast - offtov, minutes), .groups="drop"
       ) |>
-      # mutate(across(c(avg_off, avg_perim, avg_int, avg_reb, avg_3pt, avg_ast), ~as.numeric(scale(.x)), .names = "z_{.col}")) |>
-      # rename(z_off=z_avg_off, z_perim=z_avg_perim, z_inter=z_avg_int, z_reb=z_avg_reb, z_3pt=z_avg_3pt, z_ast=z_avg_ast) |>
       mutate(across(starts_with("avg_"), ~as.numeric(scale(.x)), .names = "z_{.col}")) |>
       rename_with(~ str_remove(., "avg_"), contains("avg")) |> 
       pivot_longer(cols=starts_with("z_"), names_to="category", values_to="perf_z") |>
@@ -248,7 +242,6 @@ server <- function(input, output, session) {
         pz_perim = as.numeric(scale(stl/min)),
         pz_int = as.numeric(scale(blk/min)), 
         pz_3pt   = as.numeric(scale(fg3m/min)), 
-        # Matches script pz_ast calculation
         pz_ast   = (as.numeric(scale(ast/min)) + (as.numeric(scale(offtov/min)) * -1)) / 2
       )
   })
@@ -320,11 +313,7 @@ output$deadline_results <- renderDT({
       # Identify the stat column name based on the team's top need
       target_col_name = stat_lookup[top_need_cat],
       
-      # 1. Suggested Targets (Your global function)
-      # I thought this would work
-      # display_df <- pool_df |> 
-      #     filter(!(player_id %in% untouchables)),
-          
+      # 1. Suggested Targets (Your global function)       
       trade_targets = find_prospects(top_need_cat, team_abbr, team_baseline_z, pool_df),
 
       # 2. Actual Trades Logic
@@ -335,8 +324,6 @@ output$deadline_results <- renderDT({
         
         df_trades |> 
           dplyr::filter(trade_new_team == team_abbr) |> 
-          # Hypothetical Fix 1
-          # dplyr::distinct(playerid, .keep_all = TRUE) |>
           dplyr::left_join(pool_df_full) |> 
           dplyr::mutate(
             # Use get() to evaluate the string 'col' as a column name
@@ -372,7 +359,6 @@ output$deadline_results <- renderDT({
             escape = FALSE)
 })
 
-  # FIXED CORRELATION PLOT: Upper Triangular Heatmap Tiles
  # CORRELATION MATRIX CALCULATIONS
   cor_data <- reactive({
     team_analysis() |>
@@ -382,7 +368,6 @@ output$deadline_results <- renderDT({
       correlate()
   })
   
-  # FIXED CORRELATION PLOT: Upper Triangular Heatmap Tiles
   output$cor_plot <- renderPlotly({
     cd <- cor_data()
     
@@ -400,20 +385,6 @@ output$deadline_results <- renderDT({
       ) |>
       # Filter for Upper Triangular logic (Row index < Col index)
       filter(as.numeric(term) < as.numeric(variable))
-    
-    # p <- ggplot(long_cor, aes(x = variable, y = term, fill = correlation)) +
-    #   geom_tile(color = "white") +
-    #   geom_text(aes(label = sprintf("%.2f", correlation)), color = "black", size = 4) +
-    #   scale_fill_gradient2(low = "#e67e22", mid = "white", high = "#2ecc71", 
-    #                        midpoint = 0, limit = c(-1, 1), name="Correlation") +
-    #   theme_minimal() +
-    #   theme(
-    #     axis.title = element_blank(),
-    #     panel.grid = element_blank(),
-    #     axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
-    #     legend.position = "right"
-    #   ) +
-    #   coord_fixed()  
     
     cor_colorscale <- list(
       list(0, "#e67e22"), 
@@ -444,8 +415,7 @@ output$deadline_results <- renderDT({
       )
   
   })
-  
-  # THis should be good
+
   output$cor_matrix_text <- renderPrint({
     cor_data() |> shave() |> fashion()
   })
@@ -482,13 +452,5 @@ output$deadline_results <- renderDT({
   })
 }
 
-
+# Run the App, Shift Enter on the line
 shinyApp(ui, server)
-
-# Fixed Correlation Tab
-# The Actual trades is showing a unrestricted pool, showing untouchables
-
-# THis is the main file, bad headshots is only issue to my knowledge.
-
-#BIG QUESTIONS
-# WHY ARE PLAYERS APPEARING WITH N/A LIFT VALUES IN THE TRADE COMPARISON TAB?

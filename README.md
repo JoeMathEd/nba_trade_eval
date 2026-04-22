@@ -28,6 +28,7 @@
 * Run OFFICIAL_TRADE_APP.R
 * Run "shinyApp(ui, server)" in console
 
-# Credits
+## Credits
 * Braden Udager (https://www.linkedin.com/in/braden-udager/)
 * Joe Champion
+

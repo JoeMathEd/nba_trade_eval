@@ -20,10 +20,11 @@
 * Determine Trade Urgency using weighted Z-scores
 
 ## Prerequisites
-* install.packages(shiny, tidyverse,corrr,DT,bslib,plotly,beeswarm,shinyWidget)
+* install.packages(c("shiny", "tidyverse", "corrr", "DT", "bslib", "plotly", "beeswarm", "shinyWidgets"))
 
 ## How to Run
-* Close the repository
+* Clone the repository
 * Ensure you have all Prerequisites
 * Run OFFICIAL_TRADE_APP.R
 * Run "shinyApp(ui, server)" in console
+
